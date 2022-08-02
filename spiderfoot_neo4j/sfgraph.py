@@ -31,13 +31,15 @@ def main(options):
     if options.clear:
         neo4j.clear()
 
-    total_events = 0
-    for scan_instance_id in options.scans:
-        total_events += neo4j.importScan(str(scan_instance_id).upper())
+    total_events = sum(
+        neo4j.importScan(str(scan_instance_id).upper())
+        for scan_instance_id in options.scans
+    )
+
     if len(options.scans) > 1:
         print(f'[+] Imported {total_events:,} total events')
 
-    suggestions = dict()
+    suggestions = {}
     if options.suggest:
         log.info(f'Computing {options.closeness_algorithm}\n')
         alg_fn = getattr(neo4j, options.closeness_algorithm)
@@ -59,12 +61,12 @@ def main(options):
                         suggestions[data] = suggestion
 
         suggestions = sorted(list(suggestions.items()), key=lambda x: x[-1]['Score'], reverse=True)
-        max_data_len = max([len(d[-1]['Data']) for d in suggestions])
+        max_data_len = max(len(d[-1]['Data']) for d in suggestions)
         row_format = row_format = '{}{:<12}{:<12}'
         print(row_format.format(*['Data'.ljust(max_data_len) + '  ', 'Scanned', 'Score']))
         print('-' * (max_data_len + 20))
         for k,v in suggestions:
-            k = k.ljust(max_data_len) + '  '
+            k = f'{k.ljust(max_data_len)}  '
             values = []
             try:
                 values.append(f'{v["Score"]:.4f}')
@@ -97,7 +99,10 @@ def go():
         options = parser.parse_args()
         options.suggest = options.suggest.upper().split('AFFILIATE_', 1)[-1]
 
-        assert not (options.scans and not options.sqlitedb), 'Please specify path to SpiderFoot database with --sqlitedb'
+        assert (
+            not options.scans or options.sqlitedb
+        ), 'Please specify path to SpiderFoot database with --sqlitedb'
+
         if options.scans:
             assert Path(str(options.sqlitedb)).is_file(), f'Unable to access sqlite database: {options.sqlitedb}'
 

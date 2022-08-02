@@ -52,12 +52,13 @@ class Neo4jDb:
 
     def importScan(self, scanId):
         counter = 0
-        events = {}
-        for event in self.runSql(
-            'SELECT * FROM tbl_scan_results WHERE scan_instance_id = :scan_instance_id',
-            {'scan_instance_id': scanId}
-        ):
-            events[event['hash']] = event
+        events = {
+            event['hash']: event
+            for event in self.runSql(
+                'SELECT * FROM tbl_scan_results WHERE scan_instance_id = :scan_instance_id',
+                {'scan_instance_id': scanId},
+            )
+        }
 
         # break into batches for better performance
         batches = []
@@ -69,10 +70,7 @@ class Neo4jDb:
                 sourceEvent = events[event['source_event_hash']]
                 moduleType = self._sanitizeString(event.get('module', '').split('sfp_')[-1]).upper()
                 subgraph = self.makeSubgraph(event, sourceEvent)
-                if graph is not None:
-                    graph = graph | subgraph
-                else:
-                    graph = subgraph
+                graph = graph | subgraph if graph is not None else subgraph
                 if i % batch_size == 0:
                     batches.append(graph)
                     graph = None
@@ -104,7 +102,7 @@ class Neo4jDb:
         subgraph = py2neo.Relationship(sourceEvent, moduleType, event)
 
         # if event is associated with a domain, create additional relationships
-        if any([event.has_label(l) for l in ('INTERNET_NAME', 'EMAILADDR')]):
+        if any(event.has_label(l) for l in ('INTERNET_NAME', 'EMAILADDR')):
             subgraph = subgraph | self.makeDomainNode(event)
         return subgraph
 
@@ -202,11 +200,13 @@ class Neo4jDb:
             scanned = True
 
         # lowercase certain data types
-        if any([x in eventType for x in ('INTERNET_NAME', 'DOMAIN_NAME', 'EMAILADDR')]):
+        if any(
+            x in eventType for x in ('INTERNET_NAME', 'DOMAIN_NAME', 'EMAILADDR')
+        ):
             storeData = storeData.lower()
 
         # create uniqueness constraints (also creates indexes)
-        if not eventType in self.uniquenessConstraints:
+        if eventType not in self.uniquenessConstraints:
             try:
                 self._graph.schema.create_uniqueness_constraint(eventType, 'hash')
             except py2neo.errors.ClientError:
@@ -246,13 +246,12 @@ class Neo4jDb:
         if label == 'EMAILADDR':
             parentData = host
             parentType = 'INTERNET_NAME'
+        elif tld.is_tld(parentDomain):
+            parentData = host
+            parentType = 'DOMAIN_NAME'
         else:
-            if tld.is_tld(parentDomain):
-                parentData = host
-                parentType = 'DOMAIN_NAME'
-            else:
-                parentData = parentDomain
-                parentType = 'INTERNET_NAME'
+            parentData = parentDomain
+            parentType = 'INTERNET_NAME'
 
         nodeData = {
             'data': parentData,
